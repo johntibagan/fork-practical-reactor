@@ -2,7 +2,9 @@ import org.junit.jupiter.api.*;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
+import reactor.util.retry.Retry;
 
+import java.time.Duration;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
@@ -34,6 +36,8 @@ public class c7_ErrorHandling extends ErrorHandlingBase {
     public void houston_we_have_a_problem() {
         AtomicReference<Throwable> errorRef = new AtomicReference<>();
         Flux<String> heartBeat = probeHeartBeatSignal()
+                .timeout(Duration.ofSeconds(3))
+                .doOnError(errorRef::set)
                 //todo: do your changes here
                 //todo: & here
                 ;
@@ -44,6 +48,8 @@ public class c7_ErrorHandling extends ErrorHandlingBase {
                     .verify();
 
         Assertions.assertTrue(errorRef.get() instanceof TimeoutException);
+
+        Flux.just(1, 2, 3).doFinally(signalType -> System.out.println("Completed"));
     }
 
     /**
@@ -54,6 +60,7 @@ public class c7_ErrorHandling extends ErrorHandlingBase {
     @Test
     public void potato_potato() {
         Mono<String> currentUser = getCurrentUser()
+                .onErrorMap(SecurityException::new)
                 //todo: change this line only
                 //use SecurityException
                 ;
@@ -70,7 +77,8 @@ public class c7_ErrorHandling extends ErrorHandlingBase {
      */
     @Test
     public void under_the_rug() {
-        Flux<String> messages = messageNode();
+        Flux<String> messages = messageNode()
+                .onErrorResume(e -> Mono.empty()) // OR Flux.empty()
         //todo: change this line only
         ;
 
@@ -86,9 +94,8 @@ public class c7_ErrorHandling extends ErrorHandlingBase {
     @Test
     public void have_a_backup() {
         //todo: feel free to change code as you need
-        Flux<String> messages = null;
-        messageNode();
-        backupMessageNode();
+        Flux<String> messages = messageNode()
+                .onErrorResume(e -> backupMessageNode());
 
         //don't change below this line
         StepVerifier.create(messages)
@@ -103,8 +110,8 @@ public class c7_ErrorHandling extends ErrorHandlingBase {
     @Test
     public void error_reporter() {
         //todo: feel free to change code as you need
-        Flux<String> messages = messageNode();
-        errorReportService(null);
+        Flux<String> messages = messageNode()
+                .onErrorResume(e -> errorReportService(e).then(Mono.error(e)));
 
         //don't change below this line
         StepVerifier.create(messages)
@@ -122,6 +129,7 @@ public class c7_ErrorHandling extends ErrorHandlingBase {
     @Test
     public void unit_of_work() {
         Flux<Task> taskFlux = taskQueue()
+                .flatMap(t -> t.execute().then(t.commit()).onErrorResume(t::rollback).thenReturn(t))
                 //todo: do your changes here
                 ;
 
@@ -140,6 +148,7 @@ public class c7_ErrorHandling extends ErrorHandlingBase {
     public void billion_dollar_mistake() {
         Flux<String> content = getFilesContent()
                 .flatMap(Function.identity())
+                .onErrorContinue((e, a) -> System.out.println("Error: " + e.getMessage()))
                 //todo: change this line only
                 ;
 
@@ -164,8 +173,15 @@ public class c7_ErrorHandling extends ErrorHandlingBase {
     public void resilience() {
         //todo: change code as you need
         Flux<String> content = getFilesContent()
-                .flatMap(Function.identity()); //start from here
-
+                .flatMap(m -> m.onErrorResume(e -> {
+                    System.out.println("Error: " + e.getMessage());
+                    return Mono.empty();
+                })); //start from here
+        /*OR
+                .flatMap(file -> file
+                                .doOnError(e -> System.out.println("Error occurred while reading file: " + e.getMessage()))
+                                .onErrorResume(e -> Mono.empty()));
+        * */
         //don't change below this line
         StepVerifier.create(content)
                     .expectNext("file1.txt content", "file3.txt content")
@@ -179,6 +195,7 @@ public class c7_ErrorHandling extends ErrorHandlingBase {
     @Test
     public void its_hot_in_here() {
         Mono<Integer> temperature = temperatureSensor()
+                .retry() // OR .retry(34)
                 //todo: change this line only
                 ;
 
@@ -195,6 +212,7 @@ public class c7_ErrorHandling extends ErrorHandlingBase {
     @Test
     public void back_off() {
         Mono<String> connection_result = establishConnection()
+                .retryWhen(Retry.backoff(3L, Duration.ofSeconds(2)))
                 //todo: change this line only
                 ;
 
