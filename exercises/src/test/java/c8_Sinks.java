@@ -3,6 +3,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 import reactor.test.StepVerifier;
+import reactor.util.concurrent.Queues;
 
 import java.time.Duration;
 import java.util.List;
@@ -34,10 +35,11 @@ public class c8_Sinks extends SinksBase {
     @Test
     public void single_shooter() {
         //todo: feel free to change code as you need
-        Mono<Boolean> operationCompleted = null;
+        Sinks.One<Boolean> sink = Sinks.one();
+        Mono<Boolean> operationCompleted = sink.asMono();
         submitOperation(() -> {
-
             doSomeWork(); //don't change this line
+            sink.tryEmitValue(true);
         });
 
         //don't change code below
@@ -55,10 +57,16 @@ public class c8_Sinks extends SinksBase {
     @Test
     public void single_subscriber() {
         //todo: feel free to change code as you need
-        Flux<Integer> measurements = null;
+        // unicast ->  a solo un único suscriptor
+        // Los suscriptores que se registren después de que se haya comenzado a emitir
+        // datos no recibirán esos datos ya emitidos; solo recibirán los datos emitidos
+        // después de que se hayan registrado
+        Sinks.Many<Integer> many = Sinks.many().unicast().onBackpressureBuffer();
+        Flux<Integer> measurements = many.asFlux();
         submitOperation(() -> {
-
             List<Integer> measures_readings = get_measures_readings(); //don't change this line
+            measures_readings.forEach(many::tryEmitNext);
+            many.tryEmitComplete();
         });
 
         //don't change code below
@@ -75,10 +83,14 @@ public class c8_Sinks extends SinksBase {
     @Test
     public void it_gets_crowded() {
         //todo: feel free to change code as you need
-        Flux<Integer> measurements = null;
+        // multicast -> Permite que los valores emitidos sean enviados a todos los suscriptores
+        // onBackpressureBuffer(): Maneja situaciones en las que los suscriptores no pueden procesar los valores tan rápido como se emiten, almacenando los valores en un buffer.
+        Sinks.Many<Integer> many = Sinks.many().multicast().onBackpressureBuffer();
+        Flux<Integer> measurements = many.asFlux();
         submitOperation(() -> {
-
             List<Integer> measures_readings = get_measures_readings(); //don't change this line
+            measures_readings.forEach(many::tryEmitNext);
+            many.tryEmitComplete();
         });
 
         //don't change code below
@@ -94,11 +106,15 @@ public class c8_Sinks extends SinksBase {
      * its internal buffer and stops accepting new subscribers. For this exercise, you need to make sure that if all
      * subscribers have cancelled, the sink will still accept new subscribers. Change this behavior by setting the
      * `autoCancel` parameter.
+     *
+     * https://projectreactor.io/docs/core/release/api/reactor/core/publisher/Sinks.MulticastSpec.html#onBackpressureBuffer-int-boolean-
      */
     @Test
     public void open_24_7() {
         //todo: set autoCancel parameter to prevent sink from closing
-        Sinks.Many<Integer> sink = Sinks.many().multicast().onBackpressureBuffer();
+        // bufferSize define cuántos elementos pueden almacenarse antes de desbordar.
+        // autoCancel cierra el Sink cuando todos los suscriptores cancelan.
+        Sinks.Many<Integer> sink = Sinks.many().multicast().onBackpressureBuffer(Queues.SMALL_BUFFER_SIZE, false);
         Flux<Integer> flux = sink.asFlux();
 
         //don't change code below
@@ -140,7 +156,7 @@ public class c8_Sinks extends SinksBase {
     @Test
     public void blue_jeans() {
         //todo: enable autoCancel parameter to prevent sink from closing
-        Sinks.Many<Integer> sink = Sinks.many().multicast().onBackpressureBuffer();
+        Sinks.Many<Integer> sink = Sinks.many().replay().all();
         Flux<Integer> flux = sink.asFlux();
 
         //don't change code below
@@ -187,7 +203,10 @@ public class c8_Sinks extends SinksBase {
 
         for (int i = 1; i <= 50; i++) {
             int finalI = i;
-            new Thread(() -> sink.tryEmitNext(finalI)).start();
+            new Thread(() -> {
+                System.out.println("Hilo en ejecución con ID: " + Thread.currentThread().getId());
+                sink.emitNext(finalI, (s, e) -> e.equals(Sinks.EmitResult.FAIL_NON_SERIALIZED));
+            }).start();
         }
 
         //don't change code below
